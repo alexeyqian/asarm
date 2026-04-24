@@ -1,0 +1,383 @@
+import re
+from typing import List, Dict
+
+def reg_to_int(reg: str) -> int:
+    if reg == "SP":
+        return 31
+    if not reg.startswith("X"):
+        raise ValueError(f"Invalid register {reg}")
+    return int(reg[1:])
+
+def parse_imm(val: str) -> int:
+    if val.startswith('#'):
+        return int(val[1:], 0)
+    raise ValueError(f"Invalid immediate {val}")
+
+# instruction encoders
+def encode_add(rd, rn, imm):
+    #ADD (immediate) 64-bit
+    #opcode: 0b100100100 (fixed bits)
+    return (
+        (0b1001000100 << 22) |
+        (imm << 10) |
+        (rn << 5) |
+        rd
+    )
+    
+def encode_sub(rd, rn, imm):
+    return (
+        (0b1101000100 << 22) |
+        (imm << 10) |
+        (rn << 5) |
+        rd
+    )
+
+def encode_mov(rd, rn):
+    # MOV Xd, Xn → ORR Xd, XZR, Xn
+    # XZR = 31
+    return (
+        (0b10101010000 << 21) |
+        (rn << 16) |
+        (31 << 5) |
+        rd
+    )
+
+def encode_b(offset):
+    # B label
+    # offset is signed, in instructions (not bytes)
+    return (
+        (0b000101 << 26) |
+        (offset & 0x03FFFFFF)
+    )
+    
+def encode_ldr(rt, rn, imm):
+    # LDR (unsigned immediate, 64-bit)
+    # size=11 (64-bit), opc=01
+    if imm % 8 != 0:
+        raise ValueError("LDR immediate must be multiple of 8")
+
+    imm12 = imm // 8
+
+    return (
+        (0b1111100101 << 22) |   # opcode
+        (imm12 << 10) |
+        (rn << 5) |
+        rt
+    )
+
+
+def encode_str(rt, rn, imm):
+    # STR (unsigned immediate, 64-bit)
+    if imm % 8 != 0:
+        raise ValueError("STR immediate must be multiple of 8")
+
+    imm12 = imm // 8
+
+    return (
+        (0b1111100001 << 22) |
+        (imm12 << 10) |
+        (rn << 5) |
+        rt
+    )
+
+# example: x = 10 #0b1010
+# y = x << 2 # 0b101000 = 40
+def encode_ldr_pre(rt, rn, imm):
+    # LDR Xt, [Xn, #imm]!
+    if not -256 <= imm <= 255:
+        raise ValueError("LDR pre-index immediate must be between -256 and 255")
+    imm9 = imm & 0x1FF  # 9-bit signed immediate
+    return(
+        (0b11111000010 << 21) |
+        (imm9 << 12) |
+        (rn << 5) |
+        rt
+    )
+
+def encode_str_pre(rt, rn, imm):
+    # STR Xt, [Xn, #imm]!
+    if not -256 <= imm <= 255:
+        raise ValueError("imm out of range for pre-index")
+
+    imm9 = imm & 0x1FF
+
+    return (
+        (0b11111000000 << 21) |
+        (imm9 << 12) |
+        (rn << 5) |
+        rt
+    )
+
+def encode_ldr_post(rt, rn, imm):
+    if not -256 <= imm <= 255:
+        raise ValueError("imm out of range for post-index")
+
+    imm9 = imm & 0x1FF
+
+    return (
+        (0b11111000011 << 21) |
+        (imm9 << 12) |
+        (rn << 5) |
+        rt
+    )
+
+def encode_str_post(rt, rn, imm):
+    if not -256 <= imm <= 255:
+        raise ValueError("imm out of range for post-index")
+
+    imm9 = imm & 0x1FF
+
+    return (
+        (0b11111000001 << 21) |
+        (imm9 << 12) |
+        (rn << 5) |
+        rt
+    )
+
+# writes return address into X30
+# Execution flow
+# BL func:
+#    X30 = return address
+#    jump to func
+# RET:
+#    jump to X30
+def encode_bl(offset):
+    # BL (branch with link)
+    return (
+        (0b100101 << 26) |
+        (offset & 0x03FFFFFF)
+    )
+
+# default: RET = RET X30
+# encoding is basically a special case of BR
+def encode_ret(rn=30):
+    # RET Xn
+    return (
+        (0b1101011001011111000000 << 10) |
+        (rn << 5)
+    )
+
+# Pair load/store (critical for ABI)
+# STP Xt1, Xt2, [SP, #-16]!
+def encode_stp_pre(rt1, rt2, rn, imm):
+    # imm must be multiple of 8, scaled by 8
+    if imm % 8 != 0:
+        raise ValueError("STP imm must be multiple of 8")
+
+    imm7 = (imm // 8) & 0x7F
+
+    return (
+        (0b1010100100 << 22) |   # STP pre-index
+        (imm7 << 15) |
+        (rt2 << 10) |
+        (rn << 5) |
+        rt1
+    )
+
+# Pair load/store (critical for ABI)
+# LDP Xt1, Xt2, [SP], #16
+def encode_ldp_post(rt1, rt2, rn, imm):
+    if imm % 8 != 0:
+        raise ValueError("LDP imm must be multiple of 8")
+
+    imm7 = (imm // 8) & 0x7F
+
+    return (
+        (0b1010100110 << 22) |   # LDP post-index
+        (imm7 << 15) |
+        (rt2 << 10) |
+        (rn << 5) |
+        rt1
+    )
+
+
+def parse_mem_operand(token_list):
+    """
+    Parses: [Xn, #imm]
+    Returns: (rn, imm)
+    """
+    text = "".join(token_list)
+
+    m = re.match(r"\[(X\d+)(?:,#(\d+))?\]", text)
+    if not m:
+        raise ValueError(f"Invalid memory operand: {text}")
+
+    rn = reg_to_int(m.group(1))
+    imm = int(m.group(2)) if m.group(2) else 0
+
+    return rn, imm
+
+def parse_mem_operand_full(tokens):
+    """
+    Supports:
+      [Xn, #imm]
+      [Xn, #imm]!
+      [Xn], #imm
+    Returns:
+      (rn, imm, mode)
+    mode ∈ {"offset", "pre", "post"}
+    """
+    text = "".join(tokens)
+    # pre index
+    m = re.match(r"\[(X\d+),#(-?\d+)\]!", text)
+    if m:
+        return reg_to_int(m.group(1)), int(m.group(2)), "pre"
+
+    # Post-index
+    m = re.match(r"\[(X\d+)\],#(-?\d+)", text)
+    if m:
+        return reg_to_int(m.group(1)), int(m.group(2)), "post"
+
+    # Unsigned offset
+    m = re.match(r"\[(X\d+)(?:,#(\d+))?\]", text)
+    if m:
+        imm = int(m.group(2)) if m.group(2) else 0
+        return reg_to_int(m.group(1)), imm, "offset"
+
+    raise ValueError(f"Invalid memory operand: {text}")
+
+class Assembler:
+    def __init__(self):
+        self.labels: Dict[str, int] = {}
+        self.instructions: List[str] = []
+
+    def preprocess(self, code: str):
+        lines = code.splitlines()
+        for line in lines:
+            line = line.split("//")[0].strip()
+            if line:
+                self.instructions.append(line)
+
+    def first_pass(self):
+        pc = 0
+        new_instructions = []
+        
+        for line in self.instructions:
+            if line.endswith(":"):
+                label = line[:-1]
+                self.labels[label] = pc
+            else:
+                new_instructions.append(line)
+                pc += 4  # each instruction is 4 bytes
+
+        self.instructions = new_instructions
+        
+    def second_pass(self) -> List[int]:
+        machine_code = []
+        pc = 0
+        
+        for line in self.instructions:
+            tokens = re.split(r'[,\s]+', line)
+            op = tokens[0].upper()
+            
+            if op == "ADD":
+                rd = reg_to_int(tokens[1])
+                rn = reg_to_int(tokens[2])
+                imm = parse_imm(tokens[3])
+                mc = encode_add(rd, rn, imm)
+            elif op == "SUB":
+                rd = reg_to_int(tokens[1])
+                rn = reg_to_int(tokens[2])
+                imm = parse_imm(tokens[3])
+                mc = encode_sub(rd, rn, imm)
+            elif op == "MOV":
+                rd = reg_to_int(tokens[1])
+                rn = reg_to_int(tokens[2])
+                mc = encode_mov(rd, rn)
+            
+            #Instruction | PC   | Address
+            #start:      | 0x00 | (label stored as 0)
+            #MOV X0, X1  | 0x04 | 
+            #ADD X2, ...​ | 0x08 |
+            #SUB X3, ...​ | 0x0C |
+            #B start     | 0x10 | (target = 0, offset = (0 - 0x10) // 4 = -4)
+            elif op == "B":
+                label = tokens[1]
+                if label not in self.labels:
+                    raise ValueError(f"Undefined label {label}")
+                target = self.labels[label]
+                offset = (target - pc) // 4
+                mc = encode_b(offset)
+
+            elif op == "BL":
+                label = tokens[1]
+                target = self.labels[label]
+                # for full correctness, we can fix PC semantics globally later.
+                offset = (target - pc) // 4 # real arm: target - (pc + 4)
+                mc = encode_bl(offset)
+
+            elif op == "RET":
+                if len(tokens) == 1:
+                    rn = 30  # default LR
+                else:
+                    rn = reg_to_int(tokens[1])
+                mc = encode_ret(rn)
+
+            elif op == "LDR":
+                rt = reg_to_int(tokens[1])
+                # tokens[2:] contains [Xn, #imm]
+                rn, imm, mode = parse_mem_operand_full(tokens[2:])
+                if mode == "offset":
+                    mc = encode_ldr(rt, rn, imm)
+                elif mode == "pre":
+                    mc = encode_ldr_pre(rt, rn, imm)
+                elif mode == "post":
+                    mc = encode_ldr_post(rt, rn, imm)
+
+            elif op == "STR":
+                rt = reg_to_int(tokens[1])
+                rn, imm, mode = parse_mem_operand_full(tokens[2:])
+                if mode == "offset":
+                    mc = encode_str(rt, rn, imm)
+                elif mode == "pre":
+                    mc = encode_str_pre(rt, rn, imm)
+                elif mode == "post":
+                    mc = encode_str_post(rt, rn, imm)
+                    
+            elif op == "STP":
+                rt1 = reg_to_int(tokens[1])
+                rt2 = reg_to_int(tokens[2])
+                rn, imm, mode = parse_mem_operand_full(tokens[3:])
+                if mode != "pre":
+                    raise ValueError("STP must use pre-index in this ABI helper")
+                mc = encode_stp_pre(rt1, rt2, rn, imm)
+
+            elif op == "LDP":
+                rt1 = reg_to_int(tokens[1])
+                rt2 = reg_to_int(tokens[2])
+                rn, imm, mode = parse_mem_operand_full(tokens[3:])
+                if mode != "post":
+                    raise ValueError("LDP must use post-index in this ABI helper")
+                mc = encode_ldp_post(rt1, rt2, rn, imm)
+
+            else:
+                raise ValueError(f"Unknown instruction {op}")
+
+            machine_code.append(mc)
+            pc += 4
+
+        return machine_code
+
+    def assemble(self, code: str) -> List[int]:
+        self.preprocess(code)
+        self.first_pass()
+        return self.second_pass()
+    
+# ----------------------------
+# Example Usage
+# ----------------------------
+
+if __name__ == "__main__":
+    asm = """
+        start:
+            MOV X0, X1
+            ADD X2, X0, #10
+            SUB X3, X2, #5
+            B start
+    """
+
+    assembler = Assembler()
+    machine_code = assembler.assemble(asm)
+
+    for i, code in enumerate(machine_code):
+        print(f"{i*4:04x}: {code:08x}")
