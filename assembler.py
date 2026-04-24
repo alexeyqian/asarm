@@ -1,5 +1,11 @@
 import re
 from typing import List, Dict
+from encoder import (
+    encode_add, encode_sub, encode_mov, encode_b, encode_ldr, encode_str,
+    encode_ldr_pre, encode_str_pre, encode_ldr_post, encode_str_post,
+    encode_bl, encode_ret, encode_stp_pre, encode_ldp_post,
+    encode_cmp_reg, encode_cmp_imm, encode_b_cond
+)
 
 def reg_to_int(reg: str) -> int:
     if reg == "SP":
@@ -12,13 +18,6 @@ def parse_imm(val: str) -> int:
     if val.startswith('#'):
         return int(val[1:], 0)
     raise ValueError(f"Invalid immediate {val}")
-
-from encoder import (
-    encode_add, encode_sub, encode_mov, encode_b, encode_ldr, encode_str,
-    encode_ldr_pre, encode_str_pre, encode_ldr_post, encode_str_post,
-    encode_bl, encode_ret, encode_stp_pre, encode_ldp_post,
-    encode_cmp_reg, encode_cmp_imm, encode_b_cond
-)
 
 def parse_mem_operand(token_list):
     """
@@ -64,6 +63,15 @@ def parse_mem_operand_full(tokens):
         return reg_to_int(m.group(1)), imm, "offset"
 
     raise ValueError(f"Invalid memory operand: {text}")
+
+COND_MAP = {
+    "EQ": 0,
+    "NE": 1,
+    "GE": 10,
+    "LT": 11,
+    "GT": 12,
+    "LE": 13,
+}
 
 class Assembler:
     def __init__(self):
@@ -179,6 +187,27 @@ class Assembler:
                     raise ValueError("LDP must use post-index in this ABI helper")
                 mc = encode_ldp_post(rt1, rt2, rn, imm)
 
+            elif op == "CMP":
+                rn = reg_to_int(tokens[1])
+
+                if tokens[2].startswith("#"):
+                    imm = parse_imm(tokens[2])
+                    mc = encode_cmp_imm(rn, imm)
+                else:
+                    rm = reg_to_int(tokens[2])
+                    mc = encode_cmp_reg(rn, rm)
+
+            elif op.startswith("B."):
+                cond_str = op.split(".")[1].upper()
+
+                if cond_str not in COND_MAP:
+                    raise ValueError(f"Unknown condition {cond_str}")
+                cond = COND_MAP[cond_str]
+                label = tokens[1]
+                target = self.labels[label]
+                offset = (target - pc) // 4
+                mc = encode_b_cond(cond, offset)
+    
             else:
                 raise ValueError(f"Unknown instruction {op}")
 

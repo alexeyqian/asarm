@@ -5,6 +5,8 @@ Features:
 - control flow ✅
 - memory model ✅
 - calling convention ✅
+- branching
+- conditional
 
 Simple arm64 introduction:
 https://cybersandeep.gitbook.io/arm64basicguide/chapter-1-getting-to-know-arm64
