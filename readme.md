@@ -28,6 +28,8 @@ file structure
 | Layout       | memory model        |
 | ELF          | binary format       |
 
+
+
 Simple arm64 introduction:
 https://cybersandeep.gitbook.io/arm64basicguide/chapter-1-getting-to-know-arm64
 
@@ -147,3 +149,16 @@ func:
     LDP X19, X20, [SP], #16
     LDP X29, X30, [SP], #16
     RET
+
+## Object file (.o) support
+Each file produces:
+code
+data
+symbol table
+relocations
+
+## Linker
+merges sections
+resolves symbols
+patches relocations
+emits final ELF
