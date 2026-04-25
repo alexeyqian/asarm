@@ -1,6 +1,29 @@
 import re
 from typing import List, Dict
-from encoder import *
+from encoder import Encoder
+
+# Bind Encoder staticmethods to module-level names for backward compatibility
+encode_add = Encoder.encode_add
+encode_sub = Encoder.encode_sub
+encode_mov = Encoder.encode_mov
+encode_b = Encoder.encode_b
+encode_ldr = Encoder.encode_ldr
+encode_str = Encoder.encode_str
+encode_ldr_pre = Encoder.encode_ldr_pre
+encode_str_pre = Encoder.encode_str_pre
+encode_ldr_post = Encoder.encode_ldr_post
+encode_str_post = Encoder.encode_str_post
+encode_bl = Encoder.encode_bl
+encode_ret = Encoder.encode_ret
+encode_stp_pre = Encoder.encode_stp_pre
+encode_ldp_post = Encoder.encode_ldp_post
+encode_cmp_reg = Encoder.encode_cmp_reg
+encode_cmp_imm = Encoder.encode_cmp_imm
+encode_b_cond = Encoder.encode_b_cond
+encode_svc = Encoder.encode_svc
+encode_adr = Encoder.encode_adr_not_used
+encode_adrp = Encoder.encode_adrp
+
 
 def reg_to_int(reg: str) -> int:
     if reg == "SP":
