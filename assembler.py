@@ -1,30 +1,10 @@
 import re
 from typing import List, Dict
+
+from ir import Label, Instruction
+from symbols import SymbolTable
 from encoder import Encoder
-
-# Create a module-level Encoder instance and expose bound methods for backward compatibility
-_encoder = Encoder()
-encode_add = _encoder.encode_add
-encode_sub = _encoder.encode_sub
-encode_mov = _encoder.encode_mov
-encode_b = _encoder.encode_b
-encode_ldr = _encoder.encode_ldr
-encode_str = _encoder.encode_str
-encode_ldr_pre = _encoder.encode_ldr_pre
-encode_str_pre = _encoder.encode_str_pre
-encode_ldr_post = _encoder.encode_ldr_post
-encode_str_post = _encoder.encode_str_post
-encode_bl = _encoder.encode_bl
-encode_ret = _encoder.encode_ret
-encode_stp_pre = _encoder.encode_stp_pre
-encode_ldp_post = _encoder.encode_ldp_post
-encode_cmp_reg = _encoder.encode_cmp_reg
-encode_cmp_imm = _encoder.encode_cmp_imm
-encode_b_cond = _encoder.encode_b_cond
-encode_svc = _encoder.encode_svc
-encode_adr = _encoder.encode_adr_not_used
-encode_adrp = _encoder.encode_adrp
-
+import parser
 
 def reg_to_int(reg: str) -> int:
     if reg == "SP":
@@ -98,6 +78,39 @@ class Assembler:
         self.instructions: List[str] = [] # text_instructions
         self.data_labels = {}
         self.data_bytes = bytearray()
+        
+    def assemble(self, source: str):
+        lines = source.splitlines()
+        nodes = parser.parse(lines)
+        symtab = SymbolTable()
+        encoder = Encoder()
+        pc = 0
+        
+        # pass 1: assign label offsets
+        for node in nodes:
+            if isinstance(node, Label):
+                symtab.define(node.name, pc)
+            elif isinstance(node, Instruction):
+                pc += 4
+        # pass 2: encode
+        for node in nodes:
+            if isinstance(node, Instruction):
+                self.encode_instruction(node, encoder)
+                
+        # Layout
+        layout = Layout().compute(len(encoder.code), 0)
+        
+        # Fix symbol addresses with base
+        for name in symtab.symbols:
+            symtab.symbols[name] += layout['text_base']
+        
+        # Apply relocations
+        apply_relocations(encoder.code, encoder.relocations, symtab, layout)    
+
+        # ELF
+        elf = ELFBuilder(bytes(encoder.code)).build()
+        
+        return elf
 
     def preprocess(self, code: str):
         section = "text"
