@@ -17,4 +17,5 @@ class Directive:
     name: str
     args: List[str]
 
-Node = Instruction | Label | Directive
+from typing import Union
+Node = Union[Instruction, Label, Directive]
