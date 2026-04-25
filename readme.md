@@ -1,5 +1,13 @@
 A mini assembler:
 
+Source (.s)
+Lexer - > Parser -> IR
+Symble Table (labels)
+Encoder (with reloations)
+Linker/Layout
+ELF Writer
+
+
 Features:
 - instruction encoding ✅
 - control flow ✅

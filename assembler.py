@@ -1,11 +1,6 @@
 import re
 from typing import List, Dict
-from encoder import (
-    encode_add, encode_sub, encode_mov, encode_b, encode_ldr, encode_str,
-    encode_ldr_pre, encode_str_pre, encode_ldr_post, encode_str_post,
-    encode_bl, encode_ret, encode_stp_pre, encode_ldp_post,
-    encode_cmp_reg, encode_cmp_imm, encode_b_cond
-)
+from encoder import *
 
 def reg_to_int(reg: str) -> int:
     if reg == "SP":
@@ -75,15 +70,56 @@ COND_MAP = {
 
 class Assembler:
     def __init__(self):
-        self.labels: Dict[str, int] = {}
-        self.instructions: List[str] = []
+        self.labels: Dict[str, int] = {} # text_labels
+        self.instructions: List[str] = [] # text_instructions
+        self.data_labels = {}
+        self.data_bytes = bytearray()
 
     def preprocess(self, code: str):
+        section = "text"
+
         lines = code.splitlines()
         for line in lines:
             line = line.split("//")[0].strip()
-            if line:
+            if not line:
+                continue
+            
+            if line == ".data":
+                section = "data"
+                continue
+            elif line == ".text":
+                section = "text"
+                continue
+
+            if section == "text":
                 self.instructions.append(line)
+            else:
+                self.handle_data_line(line)
+
+
+    def handle_data_line(self, line: str):
+        if line.endswith(':'):
+            label = line[:-1]
+            self.data_labels[label] = len(self.data_bytes)
+            return
+        # Example:
+        # msg:
+        #     .ascii "Hello!"'
+        # will add chars Hello! into data_bytes
+        if line.startswith(".ascii"):
+            # start from " and captures every character until it hits the closing ".
+            s = re.findall(r'"(.*)"', line)[0]
+            # encode: "Hello!" becomes: [72, 101, 108, 108, 111, 33]
+            # utf-8 is 100% compatible with ascii for the first 128 chars, so this works for basic ascii.
+            self.data_bytes.extend(s.encode('utf-8'))
+
+    def resolve_label(self, label, pc):
+        if label in self.labels:
+            return self.labels[label]
+        elif label in self.data_labels:
+            return self.data_base + self.data_labels[label]
+        else:
+            raise ValueError(f"Undefined label {label}")
 
     def first_pass(self):
         pc = 0
@@ -98,12 +134,14 @@ class Assembler:
                 pc += 4  # each instruction is 4 bytes
 
         self.instructions = new_instructions
-        
+
     def second_pass(self) -> List[int]:
         machine_code = []
         pc = 0
         
         for line in self.instructions:
+            # \s: A special sequence that matches any whitespace character,
+            # including spaces, tabs, and newlines.
             tokens = re.split(r'[,\s]+', line)
             op = tokens[0].upper()
             
@@ -207,6 +245,30 @@ class Assembler:
                 target = self.labels[label]
                 offset = (target - pc) // 4
                 mc = encode_b_cond(cond, offset)
+
+            elif op == "SVC":
+                if len(tokens) > 1:
+                    imm = parse_imm(tokens[1])
+                else:
+                    imm = 0
+                mc = encode_svc(imm)
+            
+            elif op == "ADR":
+                rd = reg_to_int(tokens[1])
+                label = tokens[2]
+                target = self.resolve_label(label, pc)
+                offset = target - pc
+                mc = encode_adr(rd, offset)
+
+            elif op == "ADRP":
+                rd = reg_to_int(tokens[1])
+                label = tokens[2]
+                target = self.resolve_label(label, pc)
+                pc_page = pc & ~0xFFF
+                target_page = target & ~0xFFF
+                offset = target_page - pc_page
+
+                mc = encode_adrp(rd, offset)
     
             else:
                 raise ValueError(f"Unknown instruction {op}")
@@ -220,7 +282,7 @@ class Assembler:
         self.preprocess(code)
         self.first_pass()
         return self.second_pass()
-    
+
 # ----------------------------
 # Example Usage
 # ----------------------------

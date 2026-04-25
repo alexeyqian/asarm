@@ -223,3 +223,33 @@ def encode_svc(imm=0):
         (imm << 5) |
         0b00001
     )
+
+#[ ELF headers ]
+#[ .text ]
+#[ .data ]
+#data_address = base + text_offset + len(text)
+def encode_adr(rd, offset):
+    # offset is signed, in bytes
+    immlo = (offset & 0x3)
+    immhi = (offset >> 2) & 0x7FFFF
+
+    return (
+        (0b00010000 << 24) |
+        (immlo << 29) |
+        (immhi << 5) |
+        rd
+    )
+
+def encode_adrp(rd, offset):
+    # offset is page-based (shifted by 12)
+    offset >>= 12
+
+    immlo = offset & 0x3
+    immhi = (offset >> 2) & 0x7FFFF
+
+    return (
+        (0b10010000 << 24) |
+        (immlo << 29) |
+        (immhi << 5) |
+        rd
+    )
