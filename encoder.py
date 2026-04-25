@@ -208,3 +208,18 @@ def encode_b_cond(cond, offset):
         ((offset & 0x7FFFF) << 5) |
         cond
     )
+    
+# on AArch64 Linux
+# X8 = syscall number
+# X0–X5 = arguments
+# X0 = return value
+# SVC #0
+def encode_svc(imm=0):
+    if not (0 <= imm < (1 << 16)):
+        raise ValueError("SVC immediate out of range")
+
+    return (
+        (0b11010100000 << 21) |  # opcode
+        (imm << 5) |
+        0b00001
+    )
