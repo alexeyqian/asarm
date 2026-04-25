@@ -60,6 +60,29 @@ class MemoryOperand:
 
 Operand = Union[Register, Immediate, Identifier, StringLiteral, MemoryOperand]
 
+"""
+example source code:
+.data
+msg:
+    .ascii "Hello\n"
+
+.text
+start:
+    ADR X1, msg
+    MOV X0, #1
+
+example IR:
+Directive(".data")
+Label("msg")
+Directive(".ascii", ["Hello\n"])
+Directive(".text")
+
+Label("start")
+
+Instruction("ADR", [Register("X1"), Identifier("msg")])
+Instruction("MOV", [Register("X0"), Immediate(1)])
+"""
+
 
 # ----------------------------
 # Parser
