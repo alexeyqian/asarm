@@ -17,6 +17,17 @@ Features:
 - conditional ✅
 - OS interface (syscalls) ✅
 
+file structure
+| Layer        | Responsibility      |
+| ------------ | ------------------- |
+| Parser       | syntax              |
+| IR           | structure           |
+| Symbol table | naming              |
+| Encoder      | instruction bits    |
+| Relocations  | deferred resolution |
+| Layout       | memory model        |
+| ELF          | binary format       |
+
 Simple arm64 introduction:
 https://cybersandeep.gitbook.io/arm64basicguide/chapter-1-getting-to-know-arm64
 
