@@ -1,215 +1,240 @@
-"""Instruction encoders extracted from assembler.py
+# encoder.py
 
-All encode_* functions are instance methods on Encoder.
-"""
-from typing import Any, List
+from dataclasses import dataclass
+from typing import Optional
 
-from relocations import Relocation
+
+# ----------------------------
+# Relocation model
+# ----------------------------
+
+@dataclass
+class Relocation:
+    symbol: str
+    type: str   # "B", "BL", "ADR", "ADRP", "B.cond"
+    addend: int = 0
+
+
+@dataclass
+class EncodedInstruction:
+    value: int
+    relocation: Optional[Relocation] = None
+
+
+# ----------------------------
+# Encoder (PURE)
+# ----------------------------
 
 class Encoder:
-    def __init__(self):
-        self.code = bytearray()
-        self.relocations: List[Relocation] = []
 
-    def emit32(self, value: int) -> None:
-        self.code += value.to_bytes(4, byteorder='little')
+    # ----------------------------
+    # Helpers
+    # ----------------------------
 
-    def emit_adr_reloc(self, rd, label) -> None:
-        # Emit placeholder, add relocation entry
-        offset = len(self.code)
-        self.emit32(0)  # placeholder
-        self.relocations.append(Relocation(offset, label, "ADR"))
+    def reg(self, r: str) -> int:
+        if r == "SP":
+            return 31
+        if r.startswith("X"):
+            return int(r[1:])
+        raise ValueError(f"Invalid register {r}")
 
-    # -- Encoder instance methods --
-    def encode_add(self, rd, rn, imm):
-        # ADD (immediate) 64-bit
-        return (
+    def imm(self, val: str) -> int:
+        if val.startswith("#"):
+            return int(val[1:], 0)
+        raise ValueError(f"Invalid immediate {val}")
+
+    # ----------------------------
+    # Arithmetic
+    # ----------------------------
+
+    def add(self, rd, rn, imm) -> EncodedInstruction:
+        instr = (
             (0b1001000100 << 22) |
             (imm << 10) |
             (rn << 5) |
             rd
         )
+        return EncodedInstruction(instr)
 
-    def encode_sub(self, rd, rn, imm):
-        return (
+    def sub(self, rd, rn, imm) -> EncodedInstruction:
+        instr = (
             (0b1101000100 << 22) |
             (imm << 10) |
             (rn << 5) |
             rd
         )
+        return EncodedInstruction(instr)
 
-    def encode_mov(self, rd, rn):
-        # MOV Xd, Xn → ORR Xd, XZR, Xn
-        # XZR = 31
-        return (
+    def mov(self, rd, rn) -> EncodedInstruction:
+        instr = (
             (0b10101010000 << 21) |
             (rn << 16) |
             (31 << 5) |
             rd
         )
+        return EncodedInstruction(instr)
 
-    def encode_b(self, offset):
-        # B label (offset in instruction words)
-        return (
-            (0b000101 << 26) |
-            (offset & 0x03FFFFFF)
-        )
+    # ----------------------------
+    # Memory (unsigned offset)
+    # ----------------------------
 
-    def encode_ldr(self, rt, rn, imm):
-        # LDR (unsigned immediate, 64-bit)
+    def ldr(self, rt, rn, imm) -> EncodedInstruction:
         if imm % 8 != 0:
-            raise ValueError("LDR immediate must be multiple of 8")
+            raise ValueError("LDR imm must be multiple of 8")
+
         imm12 = imm // 8
-        return (
+
+        instr = (
             (0b1111100101 << 22) |
             (imm12 << 10) |
             (rn << 5) |
             rt
         )
+        return EncodedInstruction(instr)
 
-    def encode_str(self, rt, rn, imm):
-        # STR (unsigned immediate, 64-bit)
+    def str(self, rt, rn, imm) -> EncodedInstruction:
         if imm % 8 != 0:
-            raise ValueError("STR immediate must be multiple of 8")
+            raise ValueError("STR imm must be multiple of 8")
+
         imm12 = imm // 8
-        return (
+
+        instr = (
             (0b1111100001 << 22) |
             (imm12 << 10) |
             (rn << 5) |
             rt
         )
+        return EncodedInstruction(instr)
 
-    def encode_ldr_pre(self, rt, rn, imm):
-        if not -256 <= imm <= 255:
-            raise ValueError("LDR pre-index immediate must be between -256 and 255")
-        imm9 = imm & 0x1FF
-        return (
-            (0b11111000010 << 21) |
-            (imm9 << 12) |
-            (rn << 5) |
-            rt
+    # ----------------------------
+    # Branch (relocation)
+    # ----------------------------
+
+    def b(self, label: str) -> EncodedInstruction:
+        return EncodedInstruction(
+            value=0,
+            relocation=Relocation(symbol=label, type="B")
         )
 
-    def encode_str_pre(self, rt, rn, imm):
-        if not -256 <= imm <= 255:
-            raise ValueError("imm out of range for pre-index")
-        imm9 = imm & 0x1FF
-        return (
-            (0b11111000000 << 21) |
-            (imm9 << 12) |
-            (rn << 5) |
-            rt
+    def bl(self, label: str) -> EncodedInstruction:
+        return EncodedInstruction(
+            value=0,
+            relocation=Relocation(symbol=label, type="BL")
         )
 
-    def encode_ldr_post(self, rt, rn, imm):
-        if not -256 <= imm <= 255:
-            raise ValueError("imm out of range for post-index")
-        imm9 = imm & 0x1FF
-        return (
-            (0b11111000011 << 21) |
-            (imm9 << 12) |
-            (rn << 5) |
-            rt
+    # ----------------------------
+    # Conditional branch
+    # ----------------------------
+
+    COND_MAP = {
+        "EQ": 0,
+        "NE": 1,
+        "GE": 10,
+        "LT": 11,
+        "GT": 12,
+        "LE": 13,
+    }
+
+    def b_cond(self, cond: str, label: str) -> EncodedInstruction:
+        if cond not in self.COND_MAP:
+            raise ValueError(f"Unknown condition {cond}")
+
+        return EncodedInstruction(
+            value=0,
+            relocation=Relocation(symbol=label, type=f"B.{cond}")
         )
 
-    def encode_str_post(self, rt, rn, imm):
-        if not -256 <= imm <= 255:
-            raise ValueError("imm out of range for post-index")
-        imm9 = imm & 0x1FF
-        return (
-            (0b11111000001 << 21) |
-            (imm9 << 12) |
-            (rn << 5) |
-            rt
-        )
+    # ----------------------------
+    # RET
+    # ----------------------------
 
-    def encode_bl(self, offset):
-        return (
-            (0b100101 << 26) |
-            (offset & 0x03FFFFFF)
-        )
-
-    def encode_ret(self, rn=30):
-        return (
+    def ret(self, rn=30) -> EncodedInstruction:
+        instr = (
             (0b1101011001011111000000 << 10) |
             (rn << 5)
         )
+        return EncodedInstruction(instr)
 
-    def encode_stp_pre(self, rt1, rt2, rn, imm):
+    # ----------------------------
+    # CMP
+    # ----------------------------
+
+    def cmp_reg(self, rn, rm) -> EncodedInstruction:
+        instr = (
+            (0b11101011000 << 21) |
+            (rm << 16) |
+            (rn << 5) |
+            31
+        )
+        return EncodedInstruction(instr)
+
+    def cmp_imm(self, rn, imm) -> EncodedInstruction:
+        instr = (
+            (0b1111000100 << 22) |
+            (imm << 10) |
+            (rn << 5) |
+            31
+        )
+        return EncodedInstruction(instr)
+
+    # ----------------------------
+    # SVC
+    # ----------------------------
+
+    def svc(self, imm=0) -> EncodedInstruction:
+        instr = (
+            (0b11010100000 << 21) |
+            (imm << 5) |
+            0b00001
+        )
+        return EncodedInstruction(instr)
+
+    # ----------------------------
+    # ADR / ADRP (relocation)
+    # ----------------------------
+
+    def adr(self, rd, label: str) -> EncodedInstruction:
+        return EncodedInstruction(
+            value=0,
+            relocation=Relocation(symbol=label, type="ADR")
+        )
+
+    def adrp(self, rd, label: str) -> EncodedInstruction:
+        return EncodedInstruction(
+            value=0,
+            relocation=Relocation(symbol=label, type="ADRP")
+        )
+
+    # ----------------------------
+    # STP / LDP (ABI)
+    # ----------------------------
+
+    def stp_pre(self, rt1, rt2, rn, imm) -> EncodedInstruction:
         if imm % 8 != 0:
             raise ValueError("STP imm must be multiple of 8")
+
         imm7 = (imm // 8) & 0x7F
-        return (
+
+        instr = (
             (0b1010100100 << 22) |
             (imm7 << 15) |
             (rt2 << 10) |
             (rn << 5) |
             rt1
         )
+        return EncodedInstruction(instr)
 
-    def encode_ldp_post(self, rt1, rt2, rn, imm):
+    def ldp_post(self, rt1, rt2, rn, imm) -> EncodedInstruction:
         if imm % 8 != 0:
             raise ValueError("LDP imm must be multiple of 8")
+
         imm7 = (imm // 8) & 0x7F
-        return (
+
+        instr = (
             (0b1010100110 << 22) |
             (imm7 << 15) |
             (rt2 << 10) |
             (rn << 5) |
             rt1
         )
-
-    def encode_cmp_reg(self, rn, rm):
-        return (
-            (0b11101011000 << 21) |
-            (rm << 16) |
-            (rn << 5) |
-            31
-        )
-
-    def encode_cmp_imm(self, rn, imm):
-        if not (0 <= imm < 4096):
-            raise ValueError("imm out of range")
-        return (
-            (0b1111000100 << 22) |
-            (imm << 10) |
-            (rn << 5) |
-            31
-        )
-
-    def encode_b_cond(self, cond, offset):
-        return (
-            (0b01010100 << 24) |
-            ((offset & 0x7FFFF) << 5) |
-            cond
-        )
-
-    def encode_svc(self, imm=0):
-        if not (0 <= imm < (1 << 16)):
-            raise ValueError("SVC immediate out of range")
-        return (
-            (0b11010100000 << 21) |
-            (imm << 5) |
-            0b00001
-        )
-
-    def encode_adr_not_used(self, rd, offset):
-        immlo = (offset & 0x3)
-        immhi = (offset >> 2) & 0x7FFFF
-        return (
-            (0b00010000 << 24) |
-            (immlo << 29) |
-            (immhi << 5) |
-            rd
-        )
-
-    def encode_adrp(self, rd, offset):
-        offset >>= 12
-        immlo = offset & 0x3
-        immhi = (offset >> 2) & 0x7FFFF
-        return (
-            (0b10010000 << 24) |
-            (immlo << 29) |
-            (immhi << 5) |
-            rd
-        )
+        return EncodedInstruction(instr)
