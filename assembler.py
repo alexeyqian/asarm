@@ -2,27 +2,28 @@ import re
 from typing import List, Dict
 from encoder import Encoder
 
-# Bind Encoder staticmethods to module-level names for backward compatibility
-encode_add = Encoder.encode_add
-encode_sub = Encoder.encode_sub
-encode_mov = Encoder.encode_mov
-encode_b = Encoder.encode_b
-encode_ldr = Encoder.encode_ldr
-encode_str = Encoder.encode_str
-encode_ldr_pre = Encoder.encode_ldr_pre
-encode_str_pre = Encoder.encode_str_pre
-encode_ldr_post = Encoder.encode_ldr_post
-encode_str_post = Encoder.encode_str_post
-encode_bl = Encoder.encode_bl
-encode_ret = Encoder.encode_ret
-encode_stp_pre = Encoder.encode_stp_pre
-encode_ldp_post = Encoder.encode_ldp_post
-encode_cmp_reg = Encoder.encode_cmp_reg
-encode_cmp_imm = Encoder.encode_cmp_imm
-encode_b_cond = Encoder.encode_b_cond
-encode_svc = Encoder.encode_svc
-encode_adr = Encoder.encode_adr_not_used
-encode_adrp = Encoder.encode_adrp
+# Create a module-level Encoder instance and expose bound methods for backward compatibility
+_encoder = Encoder()
+encode_add = _encoder.encode_add
+encode_sub = _encoder.encode_sub
+encode_mov = _encoder.encode_mov
+encode_b = _encoder.encode_b
+encode_ldr = _encoder.encode_ldr
+encode_str = _encoder.encode_str
+encode_ldr_pre = _encoder.encode_ldr_pre
+encode_str_pre = _encoder.encode_str_pre
+encode_ldr_post = _encoder.encode_ldr_post
+encode_str_post = _encoder.encode_str_post
+encode_bl = _encoder.encode_bl
+encode_ret = _encoder.encode_ret
+encode_stp_pre = _encoder.encode_stp_pre
+encode_ldp_post = _encoder.encode_ldp_post
+encode_cmp_reg = _encoder.encode_cmp_reg
+encode_cmp_imm = _encoder.encode_cmp_imm
+encode_b_cond = _encoder.encode_b_cond
+encode_svc = _encoder.encode_svc
+encode_adr = _encoder.encode_adr_not_used
+encode_adrp = _encoder.encode_adrp
 
 
 def reg_to_int(reg: str) -> int:
@@ -185,9 +186,7 @@ class Assembler:
             
             #Instruction | PC   | Address
             #start:      | 0x00 | (label stored as 0)
-            #MOV X0, X1  | 0x04 | 
-            #ADD X2, ...​ | 0x08 |
-            #SUB X3, ...​ | 0x0C |
+            #MOV X0, X1  | 0x | 0x0C |
             #B start     | 0x10 | (target = 0, offset = (0 - 0x10) // 4 = -4)
             elif op == "B":
                 label = tokens[1]

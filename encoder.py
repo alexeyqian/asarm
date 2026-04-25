@@ -1,6 +1,6 @@
 """Instruction encoders extracted from assembler.py
 
-All encode_* functions have been converted into staticmethods on Encoder.
+All encode_* functions are instance methods on Encoder.
 """
 from typing import Any, List
 
@@ -20,9 +20,8 @@ class Encoder:
         self.emit32(0)  # placeholder
         self.relocations.append(Relocation(offset, label, "ADR"))
 
-    # -- Static encoder helpers --
-    @staticmethod
-    def encode_add(rd, rn, imm):
+    # -- Encoder instance methods --
+    def encode_add(self, rd, rn, imm):
         # ADD (immediate) 64-bit
         return (
             (0b1001000100 << 22) |
@@ -31,8 +30,7 @@ class Encoder:
             rd
         )
 
-    @staticmethod
-    def encode_sub(rd, rn, imm):
+    def encode_sub(self, rd, rn, imm):
         return (
             (0b1101000100 << 22) |
             (imm << 10) |
@@ -40,8 +38,7 @@ class Encoder:
             rd
         )
 
-    @staticmethod
-    def encode_mov(rd, rn):
+    def encode_mov(self, rd, rn):
         # MOV Xd, Xn → ORR Xd, XZR, Xn
         # XZR = 31
         return (
@@ -51,16 +48,14 @@ class Encoder:
             rd
         )
 
-    @staticmethod
-    def encode_b(offset):
+    def encode_b(self, offset):
         # B label (offset in instruction words)
         return (
             (0b000101 << 26) |
             (offset & 0x03FFFFFF)
         )
 
-    @staticmethod
-    def encode_ldr(rt, rn, imm):
+    def encode_ldr(self, rt, rn, imm):
         # LDR (unsigned immediate, 64-bit)
         if imm % 8 != 0:
             raise ValueError("LDR immediate must be multiple of 8")
@@ -72,8 +67,7 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_str(rt, rn, imm):
+    def encode_str(self, rt, rn, imm):
         # STR (unsigned immediate, 64-bit)
         if imm % 8 != 0:
             raise ValueError("STR immediate must be multiple of 8")
@@ -85,8 +79,7 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_ldr_pre(rt, rn, imm):
+    def encode_ldr_pre(self, rt, rn, imm):
         if not -256 <= imm <= 255:
             raise ValueError("LDR pre-index immediate must be between -256 and 255")
         imm9 = imm & 0x1FF
@@ -97,8 +90,7 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_str_pre(rt, rn, imm):
+    def encode_str_pre(self, rt, rn, imm):
         if not -256 <= imm <= 255:
             raise ValueError("imm out of range for pre-index")
         imm9 = imm & 0x1FF
@@ -109,8 +101,7 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_ldr_post(rt, rn, imm):
+    def encode_ldr_post(self, rt, rn, imm):
         if not -256 <= imm <= 255:
             raise ValueError("imm out of range for post-index")
         imm9 = imm & 0x1FF
@@ -121,8 +112,7 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_str_post(rt, rn, imm):
+    def encode_str_post(self, rt, rn, imm):
         if not -256 <= imm <= 255:
             raise ValueError("imm out of range for post-index")
         imm9 = imm & 0x1FF
@@ -133,22 +123,19 @@ class Encoder:
             rt
         )
 
-    @staticmethod
-    def encode_bl(offset):
+    def encode_bl(self, offset):
         return (
             (0b100101 << 26) |
             (offset & 0x03FFFFFF)
         )
 
-    @staticmethod
-    def encode_ret(rn=30):
+    def encode_ret(self, rn=30):
         return (
             (0b1101011001011111000000 << 10) |
             (rn << 5)
         )
 
-    @staticmethod
-    def encode_stp_pre(rt1, rt2, rn, imm):
+    def encode_stp_pre(self, rt1, rt2, rn, imm):
         if imm % 8 != 0:
             raise ValueError("STP imm must be multiple of 8")
         imm7 = (imm // 8) & 0x7F
@@ -160,8 +147,7 @@ class Encoder:
             rt1
         )
 
-    @staticmethod
-    def encode_ldp_post(rt1, rt2, rn, imm):
+    def encode_ldp_post(self, rt1, rt2, rn, imm):
         if imm % 8 != 0:
             raise ValueError("LDP imm must be multiple of 8")
         imm7 = (imm // 8) & 0x7F
@@ -173,8 +159,7 @@ class Encoder:
             rt1
         )
 
-    @staticmethod
-    def encode_cmp_reg(rn, rm):
+    def encode_cmp_reg(self, rn, rm):
         return (
             (0b11101011000 << 21) |
             (rm << 16) |
@@ -182,8 +167,7 @@ class Encoder:
             31
         )
 
-    @staticmethod
-    def encode_cmp_imm(rn, imm):
+    def encode_cmp_imm(self, rn, imm):
         if not (0 <= imm < 4096):
             raise ValueError("imm out of range")
         return (
@@ -193,16 +177,14 @@ class Encoder:
             31
         )
 
-    @staticmethod
-    def encode_b_cond(cond, offset):
+    def encode_b_cond(self, cond, offset):
         return (
             (0b01010100 << 24) |
             ((offset & 0x7FFFF) << 5) |
             cond
         )
 
-    @staticmethod
-    def encode_svc(imm=0):
+    def encode_svc(self, imm=0):
         if not (0 <= imm < (1 << 16)):
             raise ValueError("SVC immediate out of range")
         return (
@@ -211,8 +193,7 @@ class Encoder:
             0b00001
         )
 
-    @staticmethod
-    def encode_adr_not_used(rd, offset):
+    def encode_adr_not_used(self, rd, offset):
         immlo = (offset & 0x3)
         immhi = (offset >> 2) & 0x7FFFF
         return (
@@ -222,8 +203,7 @@ class Encoder:
             rd
         )
 
-    @staticmethod
-    def encode_adrp(rd, offset):
+    def encode_adrp(self, rd, offset):
         offset >>= 12
         immlo = offset & 0x3
         immhi = (offset >> 2) & 0x7FFFF
