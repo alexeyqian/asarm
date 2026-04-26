@@ -200,6 +200,8 @@ class Parser:
     # Memory operand
     # ----------------------------
 
+    # STR X0, [SP, #-16]!
+    # MemoryOperand(base="SP", offset=-16, mode="pre")
     def parse_memory_operand(self) -> MemoryOperand:
         # [Xn, #imm] / [Xn, #imm]! / [Xn], #imm
 

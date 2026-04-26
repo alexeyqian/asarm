@@ -9,5 +9,6 @@ class Layout:
             "text_offset": text_offset,
             "data_offset": data_offset,
             "text_base": self.base + text_offset,
-            "data_base": self.base + data_offset
+            "data_base": self.base + data_offset,
+            "bss_base": self.base + data_offset + len(data_size)
         }

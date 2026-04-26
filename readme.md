@@ -162,3 +162,33 @@ merges sections
 resolves symbols
 patches relocations
 emits final ELF
+
+lexer → parser → IR → -> semantic check -> encoder → relocations → linker → ELF
+
+Signed Division
+SDIV Xd, Xn, Xm
+This instruction divides Xn by Xm (treating them as signed integers), storing the quotient in Xd.
+
+# Relocations handles:
+Relocations untouched
+Assembler just records them → linker resolves.
+B, BL (26-bit PC-relative)
+B.<cond> (19-bit PC-relative)
+ADR (±1MB PC-relative)
+ADRP (page-based PC-relative)
+
+ Current assembler accepts multiple .text, .data, .bss directives, but it does not create multiple sections. Instead, it merges everything into one section per type.
+
+
+# A minimal object file
+ELF Header
+Section Headers:
+
+[0] NULL
+[1] .text
+[2] .data
+[3] .bss
+[4] .rela.text
+[5] .symtab
+[6] .strtab
+[7] .shstrtab
